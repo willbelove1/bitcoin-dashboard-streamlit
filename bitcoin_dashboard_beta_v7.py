@@ -747,6 +747,13 @@ def main():
     st.title("📈 Crypto Trading Dashboard")
     st.markdown("Phân tích giá crypto với các chỉ báo kỹ thuật và chiến lược AI. Chọn coin và nhấn nút để tương tác!")
     
+    # Khởi động scheduler trong thread riêng
+    if 'scheduler_started' not in st.session_state:
+        st.session_state.scheduler_started = True
+        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+        scheduler_thread.start()
+        logging.info("Started auto Telegram scheduler")
+
     # Session state để lưu kết quả
     if 'analysis_done' not in st.session_state:
         st.session_state.analysis_done = False
@@ -756,33 +763,33 @@ def main():
         st.session_state.message = ""
         st.session_state.chart_path = None
         st.session_state.selected_coin = 'BTC'
-    
+
     # Sidebar
     st.sidebar.header("Tùy chọn")
-    selected_coin = st.sidebar.selectbox("Chọn Coin", list(COIN_CONFIG.keys()), index=list(COIN_CONFIG.keys()).index(st.session_state.selected_coin))
+    selected_coin = st.sidebar.selectbox("Chọn Coin", list(COIN_CONFIG.keys()), index=list(COIN_CONFIG.keys()).index('BTC'))
     st.session_state.selected_coin = selected_coin
-    
+
     if st.sidebar.button("Phân tích lại"):
         with st.spinner(f"Đang phân tích {selected_coin}..."):
             st.session_state.crypto_data, st.session_state.fib_levels, st.session_state.signal_output, st.session_state.message, st.session_state.chart_path = analyze_crypto(selected_coin)
             st.session_state.analysis_done = True
-    
+
     if st.sidebar.button("Gửi Telegram"):
         if st.session_state.message and st.session_state.signal_output:
             send_telegram_message(
-                TELEGRAM_TOKEN, 
-                TELEGRAM_CHAT_ID, 
-                st.session_state.message, 
+                TELEGRAM_TOKEN,
+                TELEGRAM_CHAT_ID,
+                st.session_state.message,
                 st.session_state.signal_output.split("### AI Strategy")[1],
                 st.session_state.chart_path
             )
         else:
             st.error("Chưa có tín hiệu để gửi. Nhấn 'Phân tích lại' trước!")
-    
+
     if st.sidebar.button("Test Telegram"):
         with st.spinner("Đang test Telegram..."):
             test_telegram(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
-    
+
     if st.sidebar.button("Backtest"):
         if st.session_state.crypto_data is not None:
             with st.spinner(f"Đang chạy backtest cho {selected_coin}..."):
@@ -791,14 +798,14 @@ def main():
                 st.markdown(backtest_result)
         else:
             st.error("Chưa có dữ liệu. Nhấn 'Phân tích lại' trước!")
-    
+
     if st.sidebar.button("Xem chiến lược AI"):
         if st.session_state.signal_output:
             st.markdown("### AI Strategy")
             st.markdown(st.session_state.signal_output.split("### AI Strategy")[1])
         else:
             st.error("Chưa có chiến lược. Nhấn 'Phân tích lại' trước!")
-    
+
     # Main content
     if st.session_state.analysis_done:
         st.markdown("### Phân Tích Tín Hiệu")
