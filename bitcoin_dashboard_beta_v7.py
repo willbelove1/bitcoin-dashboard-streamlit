@@ -193,7 +193,7 @@ def fetch_crypto_data(coin, vs_currency='usd', days=60):
                 ])
                 df_binance['date'] = pd.to_datetime(df_binance['timestamp'], unit='ms')
                 df_binance.set_index('date', inplace=True)
-                df_binance = df_binance[['open, 'high', 'low', 'close', 'volume']].astype(float)
+                df_binance = df_binance[['open', 'high', 'low', 'close', 'volume']].astype(float)
                 df_binance['price'] = df_binance['close']
                 df = df_binance
                 logging.info(f"Lấy dữ liệu {coin} từ Binance thành công")
