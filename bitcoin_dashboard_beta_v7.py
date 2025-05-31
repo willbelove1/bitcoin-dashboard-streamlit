@@ -634,4 +634,187 @@ class SignalStrategy(bt.Strategy):
             if price <= self.entry_price * (1 - self.params.stop_loss):
                 self.sell(size=1)
                 self.position_size = 0
-            elif self.signal[0] != 1
+            elif self.signal[0] != 1:
+                self.sell(size=1)
+                self.position_size = 0
+                if self.signal[0] == -1:
+                    self.sell(size=1)
+                    self.position_size = -1
+                    self.entry_price = price
+        elif self.position_size == -1:
+            if price >= self.entry_price * (1 + self.params.stop_loss):
+                self.buy(size=1)
+                self.position_size = 0
+            elif self.signal[0] != -1:
+                self.buy(size=1)
+                self.position_size = 0
+                if self.signal[0] == 1:
+                    self.buy(size=1)
+                    self.position_size = 1
+                    self.entry_price = price
+
+def run_backtest(df, coin):
+    try:
+        df_bt = df[['open', 'high', 'low', 'close', 'volume', 'signal']].copy()
+        df_bt['signal'] = df_bt['signal'].map({'Long': 1, 'Short': -1, 'Hold': 0}).astype(float)
+        
+        signal_counts = df_bt['signal'].value_counts()
+        logging.info(f"Tín hiệu backtest {coin}: {signal_counts.to_dict()}")
+        
+        data = PandasDataExtended(dataname=df_bt)
+        
+        cerebro = bt.Cerebro()
+        cerebro.adddata(data)
+        cerebro.addstrategy(SignalStrategy)
+        cerebro.broker.setcash(100000)
+        cerebro.broker.setcommission(commission=0.001)
+        cerebro.addsizer(bt.sizers.FixedSize, stake=1)
+        
+        cerebro.run()
+        
+        final_value = cerebro.broker.getvalue()
+        profit = final_value - 100000
+        output = (
+            f"### Kết Quả Backtest {coin}\n"
+            f"- **Giá trị ban đầu**: $100,000\n"
+            f"- **Giá trị cuối**: ${final_value:,.2f}\n"
+            f"- **Lợi nhuận**: ${profit:,.2f}\n"
+            f"- **Tín hiệu**: {signal_counts.to_dict()}"
+        )
+        logging.info(output)
+        return output
+    except Exception as e:
+        logging.error(f"Lỗi backtest {coin}: {str(e)}")
+        st.error(f"Lỗi backtest {coin}: {str(e)}")
+        return f"Lỗi backtest {coin}"
+
+# Phân tích crypto
+def analyze_crypto(coin):
+    st.write(f"Chạy phân tích {coin} lúc {datetime.now()}")
+    logging.info(f"Chạy phân tích {coin} lúc {datetime.now()}")
+    crypto_data = fetch_crypto_data(coin, days=60)
+    if crypto_data.empty:
+        message = f"*Lỗi Crypto Tool*\nNo data for {coin}."
+        logging.error(message)
+        st.error(message)
+        return None, None, None, None, None
+    
+    fib_levels = calculate_fibonacci_levels(crypto_data)
+    crypto_data = calculate_indicators(crypto_data)
+    crypto_data, gemini_result = generate_signals(crypto_data, fib_levels, coin)
+    signal_output, strategy_output, gemini_result = get_latest_signal(crypto_data, fib_levels, coin)
+    chart_path = plot_data(crypto_data, fib_levels, coin)
+    
+    latest = crypto_data.iloc[-1]
+    fib_level = is_near_fib_level(latest['price'], fib_levels)
+    signal_vn = 'Mua' if latest['signal'] == 'Long' else 'Bán' if latest['signal'] == 'Short' else 'Giữ'
+    adx_value = f"{latest['adx']:.2f}" if not np.isnan(latest['adx']) else 'N/A'
+    
+    send_notification(
+        latest['signal'],
+        latest['price'],
+        latest['rsi'],
+        latest['macd'],
+        latest['macd_signal'],
+        latest['bb_high'],
+        latest['bb_low'],
+        latest['adx'],
+        fib_level,
+        latest['gemini_signal'],
+        latest['gemini_reason'],
+        coin
+    )
+    
+    message = (
+        f"{coin} Signal\n"
+        f"Tín hiệu: {signal_vn}\n"
+        f"Giá: ${latest['price']:,.2f}\n"
+        f"RSI: {latest['rsi']:.1f}\n"
+        f"MACD: {latest['macd']:.0f}, Signal: {latest['macd_signal']:.0f}\n"
+        f"BB: ${latest['bb_high']:,.0f}/${latest['bb_low']:,.0f}\n"
+        f"ADX: {adx_value}\n"
+        f"Fib: {fib_level or 'N/A'}\n"
+        f"AI: {latest['gemini_signal'][:50]}\n"
+        f"Lý do: {latest['gemini_reason']}"
+    )
+    logging.info(f"Thông báo {coin}: {message}")
+    
+    return crypto_data, fib_levels, signal_output + strategy_output, message, chart_path
+
+# Streamlit app
+def main():
+    st.set_page_config(page_title="Crypto Trading Dashboard", layout="wide")
+    st.title("📈 Crypto Trading Dashboard")
+    st.markdown("Phân tích giá crypto với các chỉ báo kỹ thuật và chiến lược AI. Chọn coin và nhấn nút để tương tác!")
+    
+    # Session state để lưu kết quả
+    if 'analysis_done' not in st.session_state:
+        st.session_state.analysis_done = False
+        st.session_state.crypto_data = None
+        st.session_state.fib_levels = None
+        st.session_state.signal_output = ""
+        st.session_state.message = ""
+        st.session_state.chart_path = None
+        st.session_state.selected_coin = 'BTC'
+    
+    # Sidebar
+    st.sidebar.header("Tùy chọn")
+    selected_coin = st.sidebar.selectbox("Chọn Coin", list(COIN_CONFIG.keys()), index=list(COIN_CONFIG.keys()).index(st.session_state.selected_coin))
+    st.session_state.selected_coin = selected_coin
+    
+    if st.sidebar.button("Phân tích lại"):
+        with st.spinner(f"Đang phân tích {selected_coin}..."):
+            st.session_state.crypto_data, st.session_state.fib_levels, st.session_state.signal_output, st.session_state.message, st.session_state.chart_path = analyze_crypto(selected_coin)
+            st.session_state.analysis_done = True
+    
+    if st.sidebar.button("Gửi Telegram"):
+        if st.session_state.message and st.session_state.signal_output:
+            send_telegram_message(
+                TELEGRAM_TOKEN, 
+                TELEGRAM_CHAT_ID, 
+                st.session_state.message, 
+                st.session_state.signal_output.split("### AI Strategy")[1],
+                st.session_state.chart_path
+            )
+        else:
+            st.error("Chưa có tín hiệu để gửi. Nhấn 'Phân tích lại' trước!")
+    
+    if st.sidebar.button("Test Telegram"):
+        with st.spinner("Đang test Telegram..."):
+            test_telegram(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
+    
+    if st.sidebar.button("Backtest"):
+        if st.session_state.crypto_data is not None:
+            with st.spinner(f"Đang chạy backtest cho {selected_coin}..."):
+                backtest_result = run_backtest(st.session_state.crypto_data, selected_coin)
+                st.markdown(f"### Kết Quả Backtest {selected_coin}")
+                st.markdown(backtest_result)
+        else:
+            st.error("Chưa có dữ liệu. Nhấn 'Phân tích lại' trước!")
+    
+    if st.sidebar.button("Xem chiến lược AI"):
+        if st.session_state.signal_output:
+            st.markdown("### AI Strategy")
+            st.markdown(st.session_state.signal_output.split("### AI Strategy")[1])
+        else:
+            st.error("Chưa có chiến lược. Nhấn 'Phân tích lại' trước!")
+    
+    # Main content
+    if st.session_state.analysis_done:
+        st.markdown("### Phân Tích Tín Hiệu")
+        st.markdown(st.session_state.signal_output.split("### AI Strategy")[0])
+        
+        chart_path = st.session_state.chart_path
+        if chart_path and os.path.exists(chart_path):
+            st.image(chart_path, caption=f"Biểu đồ giá {selected_coin}, Bollinger, RSI, MACD, ADX")
+        else:
+            st.error("Không tìm thấy biểu đồ. Vui lòng chạy lại phân tích.")
+    else:
+        st.info("Chọn coin và nhấn 'Phân tích lại' để bắt đầu!")
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        logging.error(f"Lỗi ứng dụng: {str(e)}")
+        st.error(f"Lỗi ứng dụng: {str(e)}")
