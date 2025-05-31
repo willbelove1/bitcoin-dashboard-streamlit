@@ -26,6 +26,7 @@ from urllib3.util.retry import Retry
 import streamlit as st
 import threading
 import re
+import toml  # Thêm toml để đọc secrets.toml
 
 # Bỏ warning ta.trend
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="ta.trend")
@@ -38,7 +39,26 @@ logging.basicConfig(
 )
 
 # Tải biến môi trường
-load_dotenv('C:\\Users\\HP\\Downloads\\bitcoin tool\\.env')
+env_path = 'C:\\Users\\HP\\Downloads\\bitcoin tool\\.env'
+secrets_path = 'C:\\Users\\HP\\Downloads\\bitcoin tool\\secrets.toml'
+
+# Ưu tiên secrets.toml, fallback về .env
+if os.path.exists(secrets_path):
+    try:
+        with open(secrets_path, 'r') as f:
+            config = toml.load(f)
+            secrets = config.get('secrets', {})
+            for key, value in secrets.items():
+                os.environ[key] = str(value)
+        logging.info(f"Đã đọc biến môi trường từ {secrets_path}")
+    except Exception as e:
+        logging.error(f"Lỗi đọc secrets.toml: {str(e)}")
+        st.error(f"Lỗi đọc secrets.toml: {str(e)}. Thử đọc .env.")
+        load_dotenv(env_path)
+else:
+    load_dotenv(env_path)
+    logging.info(f"Không tìm thấy secrets.toml, đọc từ {env_path}")
+
 BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
 BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
@@ -62,12 +82,12 @@ COIN_CONFIG = {
 # Test Telegram API
 def test_telegram(token, chat_id):
     if not token:
-        error_msg = "Lỗi: Thiếu TELEGRAM_TOKEN trong .env"
+        error_msg = "Lỗi: Thiếu TELEGRAM_TOKEN trong .env hoặc secrets.toml"
         logging.error(error_msg)
         st.error(error_msg)
         return False
     if not chat_id:
-        error_msg = "Lỗi: Thiếu TELEGRAM_CHAT_ID trong .env"
+        error_msg = "Lỗi: Thiếu TELEGRAM_CHAT_ID trong .env hoặc secrets.toml"
         logging.error(error_msg)
         st.error(error_msg)
         return False
@@ -305,7 +325,7 @@ def get_gemini_recommendation(latest_data, fib_level, support, resistance, coin)
         retries = Retry(total=3, backoff_factor=5, status_forcelist=[429, 500, 502, 503, 504])
         session.mount('https://', HTTPAdapter(max_retries=retries))
         response = session.post(
-            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}',
+            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={GEMINI_API_KEY}',
             json=payload, headers=headers, timeout=10
         )
         response.raise_for_status()
@@ -416,12 +436,12 @@ def send_notification(signal, price, rsi, macd, macd_signal, bb_high, bb_low, ad
 # Thông báo Telegram
 def send_telegram_message(token, chat_id, message, strategy_output, chart_path):
     if not token:
-        error_msg = "Lỗi: Thiếu TELEGRAM_TOKEN trong .env"
+        error_msg = "Lỗi: Thiếu TELEGRAM_TOKEN trong .env hoặc secrets.toml"
         logging.error(error_msg)
         st.error(error_msg)
         return False
     if not chat_id:
-        error_msg = "Lỗi: Thiếu TELEGRAM_CHAT_ID trong .env"
+        error_msg = "Lỗi: Thiếu TELEGRAM_CHAT_ID trong .env hoặc secrets.toml"
         logging.error(error_msg)
         st.error(error_msg)
         return False
