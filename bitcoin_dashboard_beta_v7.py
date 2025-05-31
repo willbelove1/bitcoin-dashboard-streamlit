@@ -26,7 +26,9 @@ from urllib3.util.retry import Retry
 import streamlit as st
 import threading
 import re
-import toml  # Thêm toml để đọc secrets.toml
+import toml
+import schedule
+import time
 
 # Bỏ warning ta.trend
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="ta.trend")
@@ -78,6 +80,31 @@ COIN_CONFIG = {
     'SUI': {'bybit': 'SUIUSDT', 'binance': 'SUIUSDT', 'coingecko': 'sui'},
     'PI': {'bybit': None, 'binance': None, 'coingecko': 'pi-network'}
 }
+
+# Hàm tự động gửi Telegram
+def auto_send_telegram(coin='BTC'):
+    logging.info(f"Tự động phân tích {coin} lúc {datetime.now()}")
+    crypto_data, fib_levels, signal_output, message, chart_path = analyze_crypto(coin)
+    if message and signal_output:
+        send_telegram_message(
+            TELEGRAM_TOKEN,
+            TELEGRAM_CHAT_ID,
+            message,
+            signal_output.split("### AI Strategy")[1],
+            chart_path
+        )
+        logging.info(f"Tự động gửi Telegram cho {coin} thành công")
+    else:
+        logging.error(f"Lỗi tự động gửi Telegram cho {coin}: Không có tín hiệu")
+        st.error(f"Lỗi tự động gửi Telegram cho {coin}: Không có tín hiệu")
+
+# Hàm chạy scheduler
+def run_scheduler():
+    # Lên lịch gửi lúc 8h sáng (Asia/Ho_Chi_Minh, UTC+7)
+    schedule.every().day.at("08:00", "Asia/Ho_Chi_Minh").do(auto_send_telegram, coin='BTC')
+    while True:
+        schedule.run_pending()
+        time.sleep(60)  # Kiểm tra mỗi phút
 
 # Test Telegram API
 def test_telegram(token, chat_id):
@@ -325,7 +352,7 @@ def get_gemini_recommendation(latest_data, fib_level, support, resistance, coin)
         retries = Retry(total=3, backoff_factor=5, status_forcelist=[429, 500, 502, 503, 504])
         session.mount('https://', HTTPAdapter(max_retries=retries))
         response = session.post(
-            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={GEMINI_API_KEY}',
+            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}',
             json=payload, headers=headers, timeout=10
         )
         response.raise_for_status()
@@ -706,10 +733,11 @@ def analyze_crypto(coin):
         f"MACD: {latest['macd']:.0f}, Signal: {latest['macd_signal']:.0f}\n"
         f"BB: ${latest['bb_high']:,.0f}/${latest['bb_low']:,.0f}\n"
         f"ADX: {adx_value}\n"
-        f"Fib: {fib_level or 'N/A'}\n"
+        f"Fib: {fib_level or camino_get()}\n"
         f"AI: {latest['gemini_signal'][:50]}\n"
         f"Lý do: {latest['gemini_reason']}"
     )
+    
     logging.info(f"Thông báo {coin}: {message}")
     
     return crypto_data, fib_levels, signal_output + strategy_output, message, chart_path
@@ -720,6 +748,13 @@ def main():
     st.title("📈 Crypto Trading Dashboard")
     st.markdown("Phân tích giá crypto với các chỉ báo kỹ thuật và chiến lược AI. Chọn coin và nhấn nút để tương tác!")
     
+    # Khởi động scheduler trong thread riêng
+    if 'scheduler_started' not in st.session_state:
+        st.session_state.scheduler_started = True
+        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+        scheduler_thread.start()
+        logging.info("Started auto Telegram scheduler")
+
     # Session state để lưu kết quả
     if 'analysis_done' not in st.session_state:
         st.session_state.analysis_done = False
@@ -727,61 +762,61 @@ def main():
         st.session_state.fib_levels = None
         st.session_state.signal_output = ""
         st.session_state.message = ""
-        st.session_state.chart_path = None
+        st.session_state = None
         st.session_state.selected_coin = 'BTC'
-    
+
     # Sidebar
     st.sidebar.header("Tùy chọn")
-    selected_coin = st.sidebar.selectbox("Chọn Coin", list(COIN_CONFIG.keys()), index=list(COIN_CONFIG.keys()).index(st.session_state.selected_coin))
-    st.session_state.selected_coin = selected_coin
-    
+    selected_coin = st.sidebar.selectbox("Chọn Coin", list(COIN_CONFIG.keys()), index=list(COIN_CONFIG.keys()).index('BTC
+    st.session_state.success = selected_coin
+
     if st.sidebar.button("Phân tích lại"):
-        with st.spinner(f"Đang phân tích {selected_coin}..."):
-            st.session_state.crypto_data, st.session_state.fib_levels, st.session_state.signal_output, st.session_state.message, st.session_state.chart_path = analyze_crypto(selected_coin)
-            st.session_state.analysis_done = True
-    
-    if st.sidebar.button("Gửi Telegram"):
-        if st.session_state.message and st.session_state.signal_output:
-            send_telegram_message(
-                TELEGRAM_TOKEN, 
-                TELEGRAM_CHAT_ID, 
-                st.session_state.message, 
+        with st.spinner(f"Đang phân tích {selected_coin}"):
+            st.session_state.crypto_data, st.session_state.levels, st.session_state.signal_output, st.session_state.message, st.session_state.chart_path = fib_levels_state
+    st.session_state = True
+
+    if st.session_state.button("Gửi Telegram"):
+        if st.session_state.message && st.session_state.signal_output:
+            send_message(
+                TELEGRAM_TOKEN,
+                TELEGRAM_CHAT_ID,
+                st.session_state.message,
                 st.session_state.signal_output.split("### AI Strategy")[1],
                 st.session_state.chart_path
             )
         else:
             st.error("Chưa có tín hiệu để gửi. Nhấn 'Phân tích lại' trước!")
-    
+
     if st.sidebar.button("Test Telegram"):
         with st.spinner("Đang test Telegram..."):
             test_telegram(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
-    
-    if st.sidebar.button("Backtest"):
+
+    if st.session_state.button("Backtest"):
         if st.session_state.crypto_data is not None:
-            with st.spinner(f"Đang chạy backtest cho {selected_coin}..."):
+            with st.spinner("🔄 Running backtest for ${selected_coin}..."):
                 backtest_result = run_backtest(st.session_state.crypto_data, selected_coin)
-                st.markdown(f"### Kết Quả Backtest {selected_coin}")
+                st.markdown("### Kết quả Backtest {selected_coin}")
                 st.markdown(backtest_result)
-        else:
-            st.error("Chưa có dữ liệu. Nhấn 'Phân tích lại' trước!")
-    
+            else:
+                st.error("Chưa có dữ liệu. Nhấn 'Phân tích lại' trước!")
+
     if st.sidebar.button("Xem chiến lược AI"):
         if st.session_state.signal_output:
             st.markdown("### AI Strategy")
             st.markdown(st.session_state.signal_output.split("### AI Strategy")[1])
         else:
             st.error("Chưa có chiến lược. Nhấn 'Phân tích lại' trước!")
-    
+
     # Main content
-    if st.session_state.analysis_done:
+    if st.session_state.analytics_done:
         st.markdown("### Phân Tích Tín Hiệu")
-        st.markdown(st.session_state.signal_output.split("### AI Strategy")[0])
-        
+        st.markdown(st.session_state.signal_output.split("### AI Strategy")[0
+
         chart_path = st.session_state.chart_path
         if chart_path and os.path.exists(chart_path):
             st.image(chart_path, caption=f"Biểu đồ giá {selected_coin}, Bollinger, RSI, MACD, ADX")
         else:
-            st.error("Không tìm thấy biểu đồ. Vui lòng chạy lại phân tích.")
+                st.error("Không tìm thấy biểu đồ. Vui lòng chạy lại phân tích.")
     else:
         st.info("Chọn coin và nhấn 'Phân tích lại' để bắt đầu!")
 
@@ -790,4 +825,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         logging.error(f"Lỗi ứng dụng: {str(e)}")
-        st.error(f"Lỗi ứng dụng: {str(e)}")
+        st.error(f"Lỗi ứng dụng: {str(e)}}")
