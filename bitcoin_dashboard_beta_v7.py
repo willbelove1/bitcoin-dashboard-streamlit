@@ -1,3 +1,4 @@
+import toml
 import pandas as pd
 import numpy as np
 from pycoingecko import CoinGeckoAPI
@@ -99,18 +100,39 @@ def auto_send_telegram(coin='BTC'):
         st.error(f"Lỗi tự động gửi Telegram cho {coin}: Không có tín hiệu")
 
 # Hàm chạy scheduler
-# Chỉ gửi nếu chưa gửi trong ngày
+# Scheduler mới đọc từ telegram_scheduler.toml
 def run_scheduler():
-    def job():
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        if st.session_state.get("last_sent_date") != today_str:
-            auto_send_telegram(coin=st.session_state.get("auto_coin", "BTC"))
-            st.session_state["last_sent_date"] = today_str
-            logging.info(f"Gửi auto Telegram cho {st.session_state.get('auto_coin', 'BTC')} lúc {today_str}")
-        else:
-            logging.info("Đã gửi hôm nay, bỏ qua.")
+    scheduler_config_path = "telegram_scheduler.toml"
+    if not os.path.exists(scheduler_config_path):
+        logging.warning("Không tìm thấy config scheduler.")
+        return
 
-    schedule.every().day.at(st.session_state.get("auto_send_time", "08:00")).do(job)
+    try:
+        config = toml.load(scheduler_config_path)
+    except Exception as e:
+        logging.error(f"Lỗi đọc config scheduler: {str(e)}")
+        return
+
+    def make_job(coin, time_str):
+        def job():
+            today = datetime.now().strftime("%Y-%m-%d")
+            config = toml.load(scheduler_config_path)
+            last_sent = config["schedules"][coin].get("last_sent", "")
+            if last_sent != today:
+                auto_send_telegram(coin=coin)
+                config["schedules"][coin]["last_sent"] = today
+                with open(scheduler_config_path, "w") as f:
+                    toml.dump(config, f)
+                logging.info(f"Đã gửi {coin} lúc {today}")
+            else:
+                logging.info(f"{coin} đã gửi hôm nay.")
+        return job
+
+    for coin, setting in config.get("schedules", {}).items():
+        if setting.get("enabled", False):
+            time_str = setting.get("time", "08:00")
+            schedule.every().day.at(time_str).do(make_job(coin, time_str))
+
     while True:
         schedule.run_pending()
         time.sleep(60)  # Kiểm tra mỗi phút
@@ -758,11 +780,10 @@ def main():
     
     # Khởi động scheduler trong thread riêng
     if 'scheduler_started' not in st.session_state:
-        if threading.active_count() < 5:
-            st.session_state.scheduler_started = True
-            scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-            scheduler_thread.start()
-            logging.info("Started auto Telegram scheduler thread")
+        st.session_state.scheduler_started = True
+        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+        scheduler_thread.start()
+        logging.info("Khởi động thread scheduler Telegram tự động")
         logging.info("Started auto Telegram scheduler")
 
     # Session state để lưu kết quả
@@ -779,10 +800,24 @@ def main():
     st.sidebar.header("Tùy chọn")
     selected_coin = st.sidebar.selectbox("Chọn Coin", list(COIN_CONFIG.keys()), index=list(COIN_CONFIG.keys()).index('BTC'))
 
-    # Tuỳ chọn gửi auto Telegram
-    st.sidebar.markdown("### Auto Telegram")
-    st.session_state.auto_send_time = st.sidebar.text_input("Thời gian gửi mỗi ngày (HH:MM)", value=st.session_state.get("auto_send_time", "08:00"))
-    st.session_state.auto_coin = st.sidebar.selectbox("Coin để gửi auto", list(COIN_CONFIG.keys()), index=list(COIN_CONFIG.keys()).index(st.session_state.get("auto_coin", "BTC")))
+    # 🎛️ Cấu hình Auto Telegram Scheduler
+    st.sidebar.markdown("### ✨ Quản lý lịch gửi Telegram")
+    scheduler_config_path = "telegram_scheduler.toml"
+    if os.path.exists(scheduler_config_path):
+        with open(scheduler_config_path, "r") as f:
+            toml_content = f.read()
+
+        edited_toml = st.sidebar.text_area("📋 Nội dung telegram_scheduler.toml", toml_content, height=300)
+        if st.sidebar.button("💾 Lưu cấu hình scheduler"):
+            try:
+                parsed = toml.loads(edited_toml)
+                with open(scheduler_config_path, "w") as f:
+                    f.write(edited_toml)
+                st.sidebar.success("Đã lưu cấu hình thành công!")
+            except Exception as e:
+                st.sidebar.error(f"Lỗi định dạng TOML: {e}")
+    else:
+        st.sidebar.warning("Chưa có file cấu hình telegram_scheduler.toml")
     st.session_state.selected_coin = selected_coin
 
     if st.sidebar.button("Phân tích lại"):
