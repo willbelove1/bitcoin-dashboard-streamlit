@@ -1,0 +1,12 @@
+
+[schedules]
+
+[schedules.BTC]
+time = "08:00"
+enabled = true
+last_sent = ""
+
+[schedules.ETH]
+time = "09:30"
+enabled = true
+last_sent = ""
