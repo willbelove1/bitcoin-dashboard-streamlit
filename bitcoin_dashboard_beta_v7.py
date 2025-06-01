@@ -99,9 +99,18 @@ def auto_send_telegram(coin='BTC'):
         st.error(f"Lỗi tự động gửi Telegram cho {coin}: Không có tín hiệu")
 
 # Hàm chạy scheduler
+# Chỉ gửi nếu chưa gửi trong ngày
 def run_scheduler():
-    # Lên lịch gửi lúc 8h sáng (Asia/Ho_Chi_Minh, UTC+7)
-    schedule.every().day.at("08:00", tz="Asia/Ho_Chi_Minh").do(auto_send_telegram, coin='BTC')
+    def job():
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        if st.session_state.get("last_sent_date") != today_str:
+            auto_send_telegram(coin=st.session_state.get("auto_coin", "BTC"))
+            st.session_state["last_sent_date"] = today_str
+            logging.info(f"Gửi auto Telegram cho {st.session_state.get('auto_coin', 'BTC')} lúc {today_str}")
+        else:
+            logging.info("Đã gửi hôm nay, bỏ qua.")
+
+    schedule.every().day.at(st.session_state.get("auto_send_time", "08:00")).do(job)
     while True:
         schedule.run_pending()
         time.sleep(60)  # Kiểm tra mỗi phút
@@ -352,7 +361,7 @@ def get_gemini_recommendation(latest_data, fib_level, support, resistance, coin)
         retries = Retry(total=3, backoff_factor=5, status_forcelist=[429, 500, 502, 503, 504])
         session.mount('https://', HTTPAdapter(max_retries=retries))
         response = session.post(
-            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={GEMINI_API_KEY}',
+            f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}',
             json=payload, headers=headers, timeout=10
         )
         response.raise_for_status()
@@ -749,9 +758,11 @@ def main():
     
     # Khởi động scheduler trong thread riêng
     if 'scheduler_started' not in st.session_state:
-        st.session_state.scheduler_started = True
-        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-        scheduler_thread.start()
+        if threading.active_count() < 5:
+            st.session_state.scheduler_started = True
+            scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+            scheduler_thread.start()
+            logging.info("Started auto Telegram scheduler thread")
         logging.info("Started auto Telegram scheduler")
 
     # Session state để lưu kết quả
@@ -767,6 +778,11 @@ def main():
     # Sidebar
     st.sidebar.header("Tùy chọn")
     selected_coin = st.sidebar.selectbox("Chọn Coin", list(COIN_CONFIG.keys()), index=list(COIN_CONFIG.keys()).index('BTC'))
+
+    # Tuỳ chọn gửi auto Telegram
+    st.sidebar.markdown("### Auto Telegram")
+    st.session_state.auto_send_time = st.sidebar.text_input("Thời gian gửi mỗi ngày (HH:MM)", value=st.session_state.get("auto_send_time", "08:00"))
+    st.session_state.auto_coin = st.sidebar.selectbox("Coin để gửi auto", list(COIN_CONFIG.keys()), index=list(COIN_CONFIG.keys()).index(st.session_state.get("auto_coin", "BTC")))
     st.session_state.selected_coin = selected_coin
 
     if st.sidebar.button("Phân tích lại"):
