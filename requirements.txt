@@ -12,3 +12,4 @@ urllib3==2.2.3
 plyer==2.1.0
 toml==0.10.2
 schedule==1.2.2
+ccxt==4.4.86
