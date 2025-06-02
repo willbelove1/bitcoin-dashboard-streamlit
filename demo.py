@@ -1,5 +1,6 @@
-
+import ccxt
 import toml
+from datetime import datetime
 import pandas as pd
 import numpy as np
 from pycoingecko import CoinGeckoAPI
